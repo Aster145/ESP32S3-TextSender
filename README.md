@@ -110,9 +110,15 @@ type dist\offline-report.txt
 
 离线自检不打开串口、不发送 HID 按键。它验证编码、协议参数及设置等逻辑，不代表已在目标设备完成输入测试。
 
-## 固件源码说明
+## 固件下载与源码
 
-仓库包含 `firmware/TextKeyboard/TextKeyboard.ino`，首次发布不提供固件二进制包。已有配套 v1.3 固件可以继续使用。
+仓库包含 `firmware/TextKeyboard/TextKeyboard.ino`，发布页提供配套 **TextKeyboard v1.3 / ESP32-S3 / 16MB Flash** 固件：
+
+- [固件压缩包（BIN、源码、刷写说明）](https://github.com/Aster145/ESP32S3-TextSender/releases/download/v1.7.1/ESP32S3-TextKeyboard-v1.3-16MB.zip)
+- [直接下载合并 BIN](https://github.com/Aster145/ESP32S3-TextSender/releases/download/v1.7.1/ESP32S3-TextKeyboard-v1.3-16MB.bin)
+- [刷写说明](firmware/FLASHING.md)
+
+合并镜像从 **0x0** 写入整个 16MB Flash，会覆盖现有程序和存储数据。此包仅用于匹配配置的 ESP32-S3；已有配套 v1.3 固件可以继续使用，更新 TextSender 不需要重刷。
 
 源码面向 Arduino ESP32 的原生 USB OTG 模式，构建注释要求 `USBMode=0`、`CDCOnBoot=cdc`。UART0 使用 115200 波特率、RX GPIO44、TX GPIO43；原生 USB 同时提供 HID 键盘和 CDC 命令接口。具体开发板的引脚连接、Flash / PSRAM 选项及烧录参数应按板型确认。
 
