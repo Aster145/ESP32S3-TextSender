@@ -7,8 +7,8 @@
   <KeepOnTop>true</KeepOnTop>
   <PresetAutoEnter>false</PresetAutoEnter>
   <Ns2ProjectPath />
-  <FtpScriptPath />
   <ProjectDirectories />
+  <ScriptShortcuts />
   <Presets>
     <PhrasePreset>
       <Name>问候</Name>

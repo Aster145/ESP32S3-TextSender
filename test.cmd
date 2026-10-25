@@ -19,12 +19,12 @@ start "" /wait dist\TextSender.exe --test-offline "%CD%\work\offline.txt"
 if errorlevel 1 exit /b 1
 type work\offline.txt
 
-for %%T in (ProjectSwitchUiCheck PresetAutoEnterCheck FtpSettingsCheck) do (
+for %%T in (ProjectSwitchUiCheck PresetAutoEnterCheck ScriptSettingsCheck) do (
   "%CSC%" /nologo /target:winexe /utf8output /codepage:65001 /out:work\%%T.exe /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Xml.dll tests\%%T.cs
   if errorlevel 1 exit /b 1
   start "" /wait work\%%T.exe "%CD%\dist\TextSender.exe" "%CD%\work\%%T.txt"
   if errorlevel 1 exit /b 1
   type work\%%T.txt
 )
-echo All offline checks passed. No hardware or FTP script was run.
+echo All offline checks passed. No hardware or user script was run.
 exit /b 0
