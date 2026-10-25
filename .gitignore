@@ -1,0 +1,24 @@
+# Build output and local IDE state
+/dist/
+/bin/
+/obj/
+/.vs/
+/work/
+*.zip
+*.user
+*.suo
+*.pdb
+
+# Personal portable settings and temporary save files
+settings.xml
+settings.xml.tmp
+
+# Session files and live connection tokens
+runs/
+connect.txt
+connection.json
+result.json
+
+# Local test artifacts
+offline-report.txt
+*.log

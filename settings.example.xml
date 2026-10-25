@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SenderSettings>
+  <StartDelayMs>0</StartDelayMs>
+  <KeyGapMs>30</KeyGapMs>
+  <LineGapMs>150</LineGapMs>
+  <ClearIndent>false</ClearIndent>
+  <KeepOnTop>true</KeepOnTop>
+  <PresetAutoEnter>false</PresetAutoEnter>
+  <Ns2ProjectPath />
+  <FtpScriptPath />
+  <ProjectDirectories />
+  <Presets>
+    <PhrasePreset>
+      <Name>问候</Name>
+      <Text>Hello ESP32-S3!</Text>
+      <AppendEnter>false</AppendEnter>
+    </PhrasePreset>
+    <PhrasePreset>
+      <Name>符号示例</Name>
+      <Text>REM AbC "x#";4+8</Text>
+      <AppendEnter>false</AppendEnter>
+    </PhrasePreset>
+  </Presets>
+</SenderSettings>
