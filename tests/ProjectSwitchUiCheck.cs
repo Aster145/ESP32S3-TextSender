@@ -124,7 +124,8 @@ class ProjectSwitchUiCheck
                 EnterPath(path);
                 XmlDocument saved = ReadXml(configuration);
                 Check(SamePath(Setting(saved, "Ns2ProjectPath"), launcherRoot), "active project was not persisted");
-                Check(saved.SelectNodes("/SenderSettings/ProjectDirectories/*").Count == 2, "saved project list count incorrect");
+                Check(saved.SelectNodes("/SenderSettings/Projects/ProjectProfile").Count == 2, "saved project profile count incorrect");
+                Check(saved.SelectSingleNode("/SenderSettings/ProjectDirectories") == null, "new settings retained obsolete project directory list");
                 CheckPreserved(original, saved);
                 form.Close();
             }
@@ -167,7 +168,7 @@ class ProjectSwitchUiCheck
                     "remove changed first project's directory or file");
                 Check(preview.Text != launcherCommand, "removed project left its token in preview");
                 XmlDocument saved = ReadXml(configuration);
-                Check(saved.SelectNodes("/SenderSettings/ProjectDirectories/*").Count == 1, "removal was not persisted");
+                Check(saved.SelectNodes("/SenderSettings/Projects/ProjectProfile").Count == 1, "profile removal was not persisted");
                 CheckPreserved(original, saved);
                 NoSerial(form);
                 form.Close();

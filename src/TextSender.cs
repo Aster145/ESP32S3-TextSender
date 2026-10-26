@@ -14,8 +14,8 @@ using System.Xml;
 using System.Xml.Serialization;
 
 [assembly: System.Reflection.AssemblyTitle("ESP32-S3 TextSender")]
-[assembly: System.Reflection.AssemblyVersion("1.8.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.8.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.9.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.9.0.0")]
 
 public class PhrasePreset
 {
@@ -35,6 +35,19 @@ public class ScriptShortcut
     public ScriptShortcut Copy() { return new ScriptShortcut { Name = Name, ScriptPath = ScriptPath, WorkingDirectory = WorkingDirectory }; }
 }
 
+public class ProjectProfile
+{
+    public string Name { get; set; }
+    public string DirectoryPath { get; set; }
+    public List<ScriptShortcut> ScriptShortcuts { get; set; }
+    public ProjectProfile() { ScriptShortcuts = new List<ScriptShortcut>(); }
+    public ProjectProfile Copy() {
+        var copy = new ProjectProfile { Name = Name, DirectoryPath = DirectoryPath };
+        foreach (ScriptShortcut script in ScriptShortcuts) copy.ScriptShortcuts.Add(script.Copy());
+        return copy;
+    }
+}
+
 public class SenderSettings
 {
     public int StartDelayMs { get; set; }
@@ -49,12 +62,15 @@ public class SenderSettings
     public List<ScriptShortcut> ScriptShortcuts { get; set; }
     public bool ShouldSerializeFtpScriptPath() { return false; }
     public List<string> ProjectDirectories { get; set; }
+    public bool ShouldSerializeProjectDirectories() { return false; }
+    public List<ProjectProfile> Projects { get; set; }
     public List<PhrasePreset> Presets { get; set; }
     public SenderSettings() { KeyGapMs = 30; LineGapMs = 150; KeepOnTop = true; Ns2ProjectPath = ""; FtpScriptPath = ""; ProjectDirectories = new List<string>(); Presets = new List<PhrasePreset>(); }
     public static SenderSettings Defaults()
     {
         var settings = new SenderSettings();
         settings.ScriptShortcuts = new List<ScriptShortcut>();
+        settings.Projects = new List<ProjectProfile>();
         settings.Presets.Add(new PhrasePreset { Name = "问候", Text = "Hello ESP32-S3!" });
         settings.Presets.Add(new PhrasePreset { Name = "符号示例", Text = "REM AbC \"x#\";4+8" });
         return settings;
@@ -297,7 +313,8 @@ class TextSender : Form
     ComboBox projects = new ComboBox();
     Button removeProject = new Button();
     Button manageScripts = new Button();
-    TextBox projectPath = new TextBox(), startPreview = new TextBox();
+    TextBox projectPath = new TextBox(), projectName = new TextBox(), startPreview = new TextBox();
+    GroupBox scriptsGroup = new GroupBox();
     Label startStatus = new Label();
     CheckBox keepOnTop = new CheckBox();
     TextBox editor = new TextBox();
@@ -310,7 +327,10 @@ class TextSender : Form
     ToolTip tips = new ToolTip();
     List<PhrasePreset> presets = new List<PhrasePreset>();
     List<string> projectDirectories = new List<string>();
+    List<ProjectProfile> projectProfiles = new List<ProjectProfile>();
+    List<ScriptShortcut> unassignedScripts = new List<ScriptShortcut>();
     List<ScriptShortcut> scriptShortcuts = new List<ScriptShortcut>();
+    string activeProjectPath = "";
     SerialPort connection, active;
     bool busy, closing, loadingSettings, projectPathChanged, updatingProjects;
     string settingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
@@ -330,7 +350,7 @@ class TextSender : Form
     TextSender(string[] args)
     {
         arguments = args;
-        Text = "ESP32-S3 键盘输入 v1.8.0";
+        Text = "ESP32-S3 键盘输入 v1.9.0";
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(940, 800);
         MinimumSize = SizeFromClientSize(new Size(940, 800));
@@ -389,12 +409,13 @@ class TextSender : Form
         projects.FormattingEnabled = true;
         projects.Format += delegate(object sender, ListControlConvertEventArgs e) {
             string directory = e.ListItem as string;
-            if (directory != null) e.Value = ProjectName(directory) + "  —  " + directory;
+            if (directory != null) e.Value = DisplayProjectName(directory) + "  —  " + directory;
         };
         projects.SelectedIndexChanged += delegate {
             if (loadingSettings || updatingProjects || busy || projects.SelectedIndex < 0) return;
             projectPath.Text = (string)projects.SelectedItem;
             projectPathChanged = false;
+            LoadActiveProject();
             RebuildProjects(); SaveCurrentSettings(); RefreshStart();
         };
         chooseProject.Text = "添加文件夹…"; chooseProject.SetBounds(640, 21, 135, 32);
@@ -403,9 +424,12 @@ class TextSender : Form
         removeProject.Text = "移除项目"; removeProject.SetBounds(785, 21, 108, 32);
         removeProject.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         removeProject.Click += delegate { RemoveProject(); };
-        tips.SetToolTip(removeProject, "仅从列表移除，不会删除电脑里的文件夹。");
-        var projectLabel = new Label { Text = "项目目录", Location = new Point(12, 68), AutoSize = true };
-        projectPath.SetBounds(90, 62, 803, 28);
+        tips.SetToolTip(removeProject, "移除此项目及其脚本快捷配置，不会删除电脑里的文件夹或脚本。");
+        var projectNameLabel = new Label { Text = "项目名称", Location = new Point(12, 68), AutoSize = true };
+        projectName.SetBounds(90, 62, 180, 28);
+        tips.SetToolTip(projectName, "自定义项目名称，按回车或离开输入框保存；不会修改实际目录。");
+        var projectLabel = new Label { Text = "项目目录", Location = new Point(285, 68), AutoSize = true };
+        projectPath.SetBounds(365, 62, 528, 28);
         projectPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         tips.SetToolTip(projectPath, "可以直接粘贴项目目录或 runs 目录，按回车加入列表并获取最新口令。");
         startPreview.SetBounds(12, 100, 881, 28); startPreview.ReadOnly = true;
@@ -417,8 +441,8 @@ class TextSender : Form
         sendStart.Click += async delegate { await SendLatestStart(); };
         startStatus.SetBounds(342, 137, 550, 48);
         startStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        startGroup.Controls.AddRange(new Control[] { switchLabel, projects, removeProject, projectLabel, projectPath, chooseProject, startPreview, getStart, sendStart, startStatus });
-        var scriptsGroup = new GroupBox { Text = "启动脚本", Location = new Point(16, 518), Size = new Size(908, 90) };
+        startGroup.Controls.AddRange(new Control[] { switchLabel, projects, removeProject, projectNameLabel, projectName, projectLabel, projectPath, chooseProject, startPreview, getStart, sendStart, startStatus });
+        scriptsGroup.Text = "启动脚本"; scriptsGroup.SetBounds(16, 518, 908, 90);
         scriptsGroup.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         scriptButtons.SetBounds(12, 22, 728, 60);
         scriptButtons.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -451,9 +475,18 @@ class TextSender : Form
             projectPathChanged = true;
             updatingProjects = true; projects.SelectedIndex = -1; updatingProjects = false;
             removeProject.Enabled = false;
+            projectName.Clear(); projectName.Enabled = false;
+            scriptShortcuts = new List<ScriptShortcut>(); RebuildScriptButtons();
+            UpdateProjectControls();
             startPreview.Clear(); tips.SetToolTip(startPreview, "");
             startStatus.Text = "按回车或点击“获取最新”应用路径。";
         };
+        projectName.KeyDown += delegate(object sender, KeyEventArgs e) {
+            if (e.KeyCode != Keys.Enter) return;
+            e.Handled = e.SuppressKeyPress = true;
+            ApplyProjectName();
+        };
+        projectName.Leave += delegate { if (!closing) ApplyProjectName(); };
         projectPath.KeyDown += delegate(object sender, KeyEventArgs e) {
             if (e.KeyCode != Keys.Enter) return;
             e.Handled = e.SuppressKeyPress = true;
@@ -468,6 +501,7 @@ class TextSender : Form
         keepOnTop.CheckedChanged += delegate { TopMost = keepOnTop.Checked; SaveCurrentSettings(); };
         RefreshPorts();
         FormClosing += delegate {
+            ApplyProjectName();
             ApplyProjectPath();
             closing = true;
             try { if (busy && active != null && active.IsOpen) active.Write(new byte[] { 24 }, 0, 1); } catch { }
@@ -561,7 +595,7 @@ class TextSender : Form
 
     void LaunchScript(ScriptShortcut item)
     {
-        if (busy || closing) return;
+        if (busy || closing || !CanManageScripts() || !scriptShortcuts.Contains(item)) return;
         try {
             using (Process process = Process.Start(CreateScriptStartInfo(item))) { }
             status.Text = "已启动「" + item.Name + "」，请在打开的窗口查看运行结果。";
@@ -586,6 +620,8 @@ class TextSender : Form
 
     void ApplyScriptShortcuts(List<ScriptShortcut> shortcuts)
     {
+        if (projectPathChanged || !CanManageScripts())
+            throw new InvalidOperationException("请先选择或添加项目，再设置该项目的脚本。");
         if (shortcuts == null) throw new ArgumentNullException("shortcuts");
         var updated = new List<ScriptShortcut>();
         foreach (ScriptShortcut item in shortcuts) {
@@ -600,7 +636,7 @@ class TextSender : Form
 
     void ManageScripts()
     {
-        if (busy || closing) return;
+        if (busy || closing || !CanManageScripts()) return;
         using (var dialog = new ScriptShortcutManager(scriptShortcuts)) {
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try { ApplyScriptShortcuts(dialog.Result); }
@@ -670,7 +706,7 @@ class TextSender : Form
         send.Enabled = refresh.Enabled = ports.Enabled = caps.Enabled = manage.Enabled = phraseButtons.Enabled = !value;
         startDelay.Enabled = keyGap.Enabled = lineGap.Enabled = noIndent.Enabled = !value;
         presetAutoEnter.Enabled = !value;
-        manageScripts.Enabled = scriptButtons.Enabled = !value;
+        UpdateProjectControls();
         chooseProject.Enabled = getStart.Enabled = sendStart.Enabled = !value;
         projects.Enabled = !value;
         removeProject.Enabled = !value && projects.SelectedIndex >= 0;
@@ -725,6 +761,7 @@ class TextSender : Form
         projectPath.Text = path;
         projectPathChanged = false;
         if (Directory.Exists(path)) RememberProject(path);
+        LoadActiveProject();
         RebuildProjects();
         SaveCurrentSettings();
     }
@@ -760,6 +797,69 @@ class TextSender : Form
         return name.Length == 0 ? path : name;
     }
 
+    string DisplayProjectName(string path)
+    {
+        int index = FindProject(path);
+        return index >= 0 ? projectProfiles[index].Name : ProjectName(path);
+    }
+
+    void ApplyProjectName()
+    {
+        if (loadingSettings || busy || projectPathChanged) return;
+        int index = FindProject(activeProjectPath);
+        if (index < 0) return;
+        string name = projectName.Text.Trim();
+        if (name.Length == 0) { status.Text = "项目名称不能为空。"; return; }
+        if (name == projectProfiles[index].Name) return;
+        projectProfiles[index].Name = name;
+        projectName.Text = name;
+        RebuildProjects(); UpdateProjectControls();
+        if (SaveCurrentSettings()) status.Text = "项目名称已保存。";
+    }
+
+    static List<ScriptShortcut> CopyScripts(List<ScriptShortcut> scripts)
+    {
+        var copy = new List<ScriptShortcut>();
+        if (scripts != null) foreach (ScriptShortcut script in scripts) copy.Add(script.Copy());
+        return copy;
+    }
+
+    bool CanManageScripts()
+    {
+        return !projectPathChanged && (FindProject(activeProjectPath) >= 0 ||
+            (projectProfiles.Count == 0 && String.IsNullOrWhiteSpace(projectPath.Text)));
+    }
+
+    void UpdateProjectControls()
+    {
+        int index = projectPathChanged ? -1 : FindProject(activeProjectPath);
+        projectName.Enabled = !busy && index >= 0;
+        manageScripts.Enabled = scriptButtons.Enabled = !busy && CanManageScripts();
+        scriptsGroup.Text = index >= 0 ? "启动脚本 · " + projectProfiles[index].Name :
+            (CanManageScripts() ? "启动脚本 · 未分配（添加首个项目后归入该项目）" : "启动脚本 · 请先选择项目");
+    }
+
+    void LoadActiveProject()
+    {
+        int index = FindProject(projectPath.Text);
+        activeProjectPath = index >= 0 ? projectProfiles[index].DirectoryPath : "";
+        projectName.Text = index >= 0 ? projectProfiles[index].Name : "";
+        scriptShortcuts = index >= 0 ? CopyScripts(projectProfiles[index].ScriptShortcuts) :
+            (projectProfiles.Count == 0 && String.IsNullOrWhiteSpace(projectPath.Text) ? CopyScripts(unassignedScripts) : new List<ScriptShortcut>());
+        RebuildScriptButtons(); UpdateProjectControls();
+    }
+
+    void StoreActiveScripts()
+    {
+        // Editing a path clears the visible buttons before the new path is applied.
+        // That temporary empty view must never overwrite the previous project's list.
+        if (projectPathChanged) return;
+        int index = FindProject(activeProjectPath);
+        if (index >= 0) projectProfiles[index].ScriptShortcuts = CopyScripts(scriptShortcuts);
+        else if (projectProfiles.Count == 0 && String.IsNullOrWhiteSpace(projectPath.Text))
+            unassignedScripts = CopyScripts(scriptShortcuts);
+    }
+
     int FindProject(string path)
     {
         string key = ProjectKey(path);
@@ -771,7 +871,13 @@ class TextSender : Form
     void RememberProject(string path)
     {
         path = NormalizeProjectDirectory(path);
-        if (!String.IsNullOrWhiteSpace(path) && FindProject(path) < 0) projectDirectories.Add(path);
+        if (String.IsNullOrWhiteSpace(path) || FindProject(path) >= 0) return;
+        var profile = new ProjectProfile { Name = ProjectName(path), DirectoryPath = path };
+        if (projectProfiles.Count == 0) {
+            profile.ScriptShortcuts = CopyScripts(unassignedScripts);
+            unassignedScripts.Clear();
+        }
+        projectProfiles.Add(profile); projectDirectories.Add(path);
     }
 
     void RebuildProjects()
@@ -785,6 +891,7 @@ class TextSender : Form
         } finally { projects.EndUpdate(); updatingProjects = false; }
         removeProject.Enabled = !busy && projects.SelectedIndex >= 0;
         tips.SetToolTip(projects, projectPath.Text);
+        tips.SetToolTip(projectPath, projectPath.Text);
     }
 
     void RemoveProject()
@@ -792,8 +899,10 @@ class TextSender : Form
         if (busy || projects.SelectedIndex < 0) return;
         int index = projects.SelectedIndex;
         projectDirectories.RemoveAt(index);
+        projectProfiles.RemoveAt(index);
         projectPath.Text = projectDirectories.Count == 0 ? "" : projectDirectories[Math.Min(index, projectDirectories.Count - 1)];
         projectPathChanged = false;
+        LoadActiveProject();
         RebuildProjects(); SaveCurrentSettings(); RefreshStart();
     }
 
@@ -844,6 +953,12 @@ class TextSender : Form
         foreach (PhrasePreset item in settings.Presets) ValidatePreset(item);
         if (settings.ScriptShortcuts == null) throw new Exception("脚本快捷项列表无效。");
         foreach (ScriptShortcut item in settings.ScriptShortcuts) ValidateScriptShortcut(item);
+        if (settings.Projects == null) throw new Exception("项目列表无效。");
+        foreach (ProjectProfile project in settings.Projects) {
+            if (project == null || String.IsNullOrWhiteSpace(project.Name) || String.IsNullOrWhiteSpace(project.DirectoryPath) || project.ScriptShortcuts == null)
+                throw new Exception("项目名称、目录或脚本列表无效。");
+            foreach (ScriptShortcut item in project.ScriptShortcuts) ValidateScriptShortcut(item);
+        }
     }
 
     static void MigrateScriptShortcuts(SenderSettings settings)
@@ -857,30 +972,59 @@ class TextSender : Form
         settings.FtpScriptPath = "";
     }
 
+    static void MigrateProjects(SenderSettings settings)
+    {
+        if (settings.Projects == null) {
+            MigrateScriptShortcuts(settings);
+            settings.Projects = new List<ProjectProfile>();
+            var paths = new List<string>();
+            if (settings.ProjectDirectories != null) paths.AddRange(settings.ProjectDirectories);
+            paths.Add(settings.Ns2ProjectPath);
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string value in paths) {
+                string path = NormalizeProjectDirectory(value);
+                if (String.IsNullOrWhiteSpace(path) || !keys.Add(ProjectKey(path))) continue;
+                settings.Projects.Add(new ProjectProfile { Name = ProjectName(path), DirectoryPath = path,
+                    ScriptShortcuts = CopyScripts(settings.ScriptShortcuts) });
+            }
+            if (settings.Projects.Count > 0) settings.ScriptShortcuts.Clear();
+        } else {
+            // A saved project list, even an empty one, is authoritative.
+            // Legacy paths and FTP fields must not recreate removed projects/scripts.
+            if (settings.ScriptShortcuts == null) settings.ScriptShortcuts = new List<ScriptShortcut>();
+            settings.FtpScriptPath = "";
+        }
+        settings.ProjectDirectories = new List<string>();
+    }
+
     static SenderSettings ReadSettingsFile(string path)
     {
         using (var stream = File.OpenRead(path)) {
             // XmlSerializer may allocate a List even when its XML element is absent.
             // Check the element itself so an explicit empty list never revives legacy FTP.
-            bool hasScriptList = false;
+            bool hasScriptList = false, hasProjects = false;
             using (XmlReader reader = XmlReader.Create(stream, new XmlReaderSettings { CloseInput = false })) {
                 while (reader.Read()) {
                     if (reader.NodeType == XmlNodeType.Element && reader.Depth == 1 && reader.LocalName == "ScriptShortcuts")
                         hasScriptList = true;
+                    if (reader.NodeType == XmlNodeType.Element && reader.Depth == 1 && reader.LocalName == "Projects")
+                        hasProjects = true;
                 }
             }
             stream.Position = 0;
             var settings = (SenderSettings)new XmlSerializer(typeof(SenderSettings)).Deserialize(stream);
             if (!hasScriptList) settings.ScriptShortcuts = null;
             else if (settings.ScriptShortcuts == null) settings.ScriptShortcuts = new List<ScriptShortcut>();
-            MigrateScriptShortcuts(settings);
+            if (!hasProjects) settings.Projects = null;
+            else if (settings.Projects == null) settings.Projects = new List<ProjectProfile>();
+            MigrateProjects(settings);
             ValidateSettings(settings); return settings;
         }
     }
 
     static void WriteSettingsFile(string path, SenderSettings settings)
     {
-        if (settings != null) MigrateScriptShortcuts(settings);
+        if (settings != null) MigrateProjects(settings);
         ValidateSettings(settings);
         string temporary = path + ".tmp";
         try {
@@ -895,21 +1039,24 @@ class TextSender : Form
     {
         loadingSettings = true;
         SenderSettings settings = SenderSettings.Defaults();
-        try { if (File.Exists(settingsPath)) settings = ReadSettingsFile(settingsPath); }
+        bool firstRun = !File.Exists(settingsPath);
+        try { if (!firstRun) settings = ReadSettingsFile(settingsPath); }
         catch (Exception ex) { status.Text = "设置读取失败，已使用默认值：" + ex.Message; }
         startDelay.Value = settings.StartDelayMs / 1000M;
         keyGap.Value = settings.KeyGapMs; lineGap.Value = settings.LineGapMs; noIndent.Checked = settings.ClearIndent;
         keepOnTop.Checked = settings.KeepOnTop; TopMost = settings.KeepOnTop;
         presetAutoEnter.Checked = settings.PresetAutoEnter;
-        scriptShortcuts = new List<ScriptShortcut>();
-        foreach (ScriptShortcut item in settings.ScriptShortcuts) scriptShortcuts.Add(item.Copy());
-        RebuildScriptButtons();
-        projectPath.Text = String.IsNullOrWhiteSpace(settings.Ns2ProjectPath) ? (Environment.GetEnvironmentVariable("NS2JB_RUNS") ?? "") : settings.Ns2ProjectPath;
+        unassignedScripts = CopyScripts(settings.ScriptShortcuts);
+        projectPath.Text = settings.Ns2ProjectPath ?? "";
+        if (firstRun && String.IsNullOrWhiteSpace(projectPath.Text)) projectPath.Text = Environment.GetEnvironmentVariable("NS2JB_RUNS") ?? "";
+        projectProfiles = new List<ProjectProfile>();
         projectDirectories.Clear();
-        if (settings.ProjectDirectories != null)
-            foreach (string directory in settings.ProjectDirectories) RememberProject(directory);
-        RememberProject(projectPath.Text);
+        foreach (ProjectProfile profile in settings.Projects) {
+            projectProfiles.Add(profile.Copy()); projectDirectories.Add(profile.DirectoryPath);
+        }
+        if (firstRun && Directory.Exists(projectPath.Text)) RememberProject(projectPath.Text);
         projectPathChanged = false;
+        LoadActiveProject();
         RebuildProjects();
         presets = settings.Presets; RebuildPresetButtons(); UpdateSendLabel();
         loadingSettings = false;
@@ -918,10 +1065,13 @@ class TextSender : Form
     bool SaveCurrentSettings()
     {
         if (loadingSettings) return true;
+        StoreActiveScripts();
+        var savedProjects = new List<ProjectProfile>();
+        foreach (ProjectProfile profile in projectProfiles) savedProjects.Add(profile.Copy());
         var settings = new SenderSettings { StartDelayMs = (int)(startDelay.Value * 1000), KeyGapMs = (int)keyGap.Value,
             LineGapMs = (int)lineGap.Value, ClearIndent = noIndent.Checked, KeepOnTop = keepOnTop.Checked, PresetAutoEnter = presetAutoEnter.Checked,
-            Ns2ProjectPath = projectPath.Text, ScriptShortcuts = new List<ScriptShortcut>(scriptShortcuts),
-            ProjectDirectories = new List<string>(projectDirectories), Presets = presets };
+            Ns2ProjectPath = projectPath.Text, ScriptShortcuts = CopyScripts(unassignedScripts),
+            Projects = savedProjects, Presets = presets };
         try { WriteSettingsFile(settingsPath, settings); return true; }
         catch (Exception ex) { status.Text = "设置未能保存；本次仍可使用，下次启动不会保留：" + ex.Message; return false; }
     }

@@ -58,7 +58,7 @@ class ScriptSettingsCheck
             Check(buttons[index].Text == names[index] && !buttons[index].UseMnemonic, "shortcut button name/order or literal ampersand is incorrect");
     }
     static void CheckPreserved(XmlDocument before, XmlDocument after) {
-        foreach (string name in new[] { "StartDelayMs", "KeyGapMs", "LineGapMs", "ClearIndent", "KeepOnTop", "PresetAutoEnter", "Ns2ProjectPath", "ProjectDirectories", "Presets" })
+        foreach (string name in new[] { "StartDelayMs", "KeyGapMs", "LineGapMs", "ClearIndent", "KeepOnTop", "PresetAutoEnter", "Ns2ProjectPath", "Presets" })
             Check(before.SelectSingleNode("/SenderSettings/" + name).OuterXml == after.SelectSingleNode("/SenderSettings/" + name).OuterXml,
                 "script changes modified unrelated setting " + name);
     }
@@ -109,8 +109,16 @@ class ScriptSettingsCheck
             SetProperty(firstPreset, "Text", "  REM Existing\r\n  NEXT"); SetProperty(firstPreset, "AppendEnter", true);
             StaticCall("WriteSettingsFile", configuration, defaults);
 
-            // Recreate a genuine old XML shape, with legacy FTP but no new list.
+            // Recreate a genuine old XML shape, before both project profiles and script lists.
             XmlDocument oldSettings = ReadXml(configuration);
+            XmlNode projectOption = oldSettings.SelectSingleNode("/SenderSettings/Projects");
+            Check(projectOption != null, "new settings must serialize an explicit project list");
+            projectOption.ParentNode.RemoveChild(projectOption);
+            XmlNode oldDirectories = oldSettings.SelectSingleNode("/SenderSettings/ProjectDirectories");
+            if (oldDirectories == null) { oldDirectories = oldSettings.CreateElement("ProjectDirectories"); oldSettings.DocumentElement.AppendChild(oldDirectories); }
+            oldDirectories.RemoveAll();
+            XmlNode oldDirectory = oldSettings.CreateElement("string"); oldDirectory.InnerText = project; oldDirectories.AppendChild(oldDirectory);
+            oldSettings.SelectSingleNode("/SenderSettings/Ns2ProjectPath").InnerText = project;
             XmlNode listOption = oldSettings.SelectSingleNode("/SenderSettings/ScriptShortcuts");
             Check(listOption != null, "new settings must serialize an explicit empty shortcut list");
             listOption.ParentNode.RemoveChild(listOption);
@@ -129,7 +137,8 @@ class ScriptSettingsCheck
                 NoSerial(form);
             }
             XmlDocument migratedSettings = ReadXml(configuration);
-            Check(migratedSettings.SelectNodes("/SenderSettings/ScriptShortcuts/ScriptShortcut").Count == 1, "migration did not persist one shortcut");
+            Check(migratedSettings.SelectNodes("/SenderSettings/Projects/ProjectProfile/ScriptShortcuts/ScriptShortcut").Count == 1, "migration did not persist one project shortcut");
+            Check(migratedSettings.SelectNodes("/SenderSettings/ScriptShortcuts/ScriptShortcut").Count == 0, "project migration retained a duplicate unassigned shortcut");
             CheckPreserved(oldSettings, migratedSettings);
             using (Form form = CreateForm(configuration)) {
                 Check(((IList)Field(form, "scriptShortcuts")).Count == 1, "legacy FTP migrated more than once");
@@ -189,9 +198,9 @@ class ScriptSettingsCheck
                 NoSerial(form);
             }
             XmlDocument emptySettings = ReadXml(configuration);
-            Check(emptySettings.SelectSingleNode("/SenderSettings/ScriptShortcuts") != null &&
-                emptySettings.SelectNodes("/SenderSettings/ScriptShortcuts/ScriptShortcut").Count == 0,
-                "deleting the last shortcut must persist an explicit empty list");
+            Check(emptySettings.SelectSingleNode("/SenderSettings/Projects/ProjectProfile/ScriptShortcuts") != null &&
+                emptySettings.SelectNodes("/SenderSettings/Projects/ProjectProfile/ScriptShortcuts/ScriptShortcut").Count == 0,
+                "deleting the last project shortcut must persist an explicit empty list");
             // A stale legacy value must not resurrect a deliberately emptied new list.
             XmlNode staleLegacy = emptySettings.SelectSingleNode("/SenderSettings/FtpScriptPath");
             if (staleLegacy == null) { staleLegacy = emptySettings.CreateElement("FtpScriptPath"); emptySettings.DocumentElement.AppendChild(staleLegacy); }
