@@ -13,7 +13,8 @@ if not exist "%PROJECT_ROOT%dist" (
     if errorlevel 1 exit /b 1
 )
 
-"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /out:"%PROJECT_ROOT%dist\TextSender.exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Xml.dll "%PROJECT_ROOT%src\TextSender.cs" "%PROJECT_ROOT%src\StartTokenReader.cs" "%PROJECT_ROOT%src\ExplorerFolderPicker.cs"
+for %%C in ("%CSC%") do set "FRAMEWORK_DIR=%%~dpC"
+"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /utf8output /codepage:65001 /out:"%PROJECT_ROOT%dist\TextSender.exe" /win32icon:"%PROJECT_ROOT%assets\TextSender.ico" /resource:"%PROJECT_ROOT%assets\TextSender.ico",TextSender.ico /reference:"%FRAMEWORK_DIR%Microsoft.VisualBasic.dll" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Xml.dll "%PROJECT_ROOT%src\TextSender.cs" "%PROJECT_ROOT%src\SenderApplication.cs" "%PROJECT_ROOT%src\StartTokenReader.cs" "%PROJECT_ROOT%src\ExplorerFolderPicker.cs"
 if errorlevel 1 exit /b 1
 
 if not exist "%PROJECT_ROOT%dist\settings.xml" (

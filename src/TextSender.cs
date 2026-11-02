@@ -14,8 +14,8 @@ using System.Xml;
 using System.Xml.Serialization;
 
 [assembly: System.Reflection.AssemblyTitle("ESP32-S3 TextSender")]
-[assembly: System.Reflection.AssemblyVersion("1.9.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.9.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.9.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.9.1.0")]
 
 public class PhrasePreset
 {
@@ -90,6 +90,7 @@ class ScriptShortcutManager : Form
         Result = new List<ScriptShortcut>();
         foreach (ScriptShortcut item in source) Result.Add(item.Copy());
         Text = "管理脚本";
+        Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(820, 420);
         MinimumSize = SizeFromClientSize(new Size(760, 380));
@@ -222,6 +223,7 @@ class PresetManager : Form
         Result = new List<PhrasePreset>();
         foreach (PhrasePreset item in source) Result.Add(item.Copy());
         Text = "管理常用短语";
+        Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(760, 480);
         MinimumSize = new Size(720, 450);
@@ -342,15 +344,15 @@ class TextSender : Form
     static void Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--test-offline") { OfflineTest(args[1]); return; }
-        Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new TextSender(args));
+        new SenderApplication().Run(args);
     }
 
-    TextSender(string[] args)
+    internal TextSender(string[] args)
     {
         arguments = args;
-        Text = "ESP32-S3 键盘输入 v1.9.0";
+        Text = "ESP32-S3 键盘输入 v1.9.1";
+        Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(940, 800);
         MinimumSize = SizeFromClientSize(new Size(940, 800));
