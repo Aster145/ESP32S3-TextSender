@@ -14,8 +14,8 @@ using System.Xml;
 using System.Xml.Serialization;
 
 [assembly: System.Reflection.AssemblyTitle("ESP32-S3 TextSender")]
-[assembly: System.Reflection.AssemblyVersion("1.9.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.9.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.10.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.10.0.0")]
 
 public class PhrasePreset
 {
@@ -311,6 +311,7 @@ class TextSender : Form
 {
     ComboBox ports = new ComboBox();
     Button refresh = new Button(), send = new Button(), stop = new Button(), caps = new Button(), manage = new Button();
+    Button directKeyboard = new Button();
     Button chooseProject = new Button(), getStart = new Button(), sendStart = new Button();
     ComboBox projects = new ComboBox();
     Button removeProject = new Button();
@@ -351,7 +352,7 @@ class TextSender : Form
     internal TextSender(string[] args)
     {
         arguments = args;
-        Text = "ESP32-S3 键盘输入 v1.9.1";
+        Text = "ESP32-S3 键盘输入 v1.10.0";
         Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(940, 800);
@@ -374,7 +375,12 @@ class TextSender : Form
             finally { if (!closing) SetBusy(false); }
         };
         keepOnTop.Text = "窗口置顶";
-        keepOnTop.SetBounds(640, 16, 180, 28);
+        keepOnTop.SetBounds(620, 16, 145, 28);
+        directKeyboard.Text = "键盘直通…";
+        directKeyboard.SetBounds(790, 13, 134, 32);
+        directKeyboard.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        directKeyboard.Click += delegate { OpenKeyboardPassthrough(); };
+        tips.SetToolTip(directKeyboard, "用电脑键盘直接控制目标设备，支持同时按住多个键；需要 TextKeyboard v1.4 固件。");
         var hint = new Label {
             Text = "最多 8192 个 ASCII 字符。等待设为 0 时立即发送；首次连接仍需要约 1.2 秒初始化。",
             Location = new Point(16, 58), Size = new Size(908, 30), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -470,7 +476,7 @@ class TextSender : Form
         status.SetBounds(16, 751, 908, 42);
         status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         Controls.AddRange(new Control[] { label, ports, refresh, caps, hint, delayLabel, startDelay,
-            keyLabel, keyGap, lineLabel, lineGap, noIndent, favorites, startGroup, scriptsGroup, keepOnTop, editor, send, stop, status });
+            keyLabel, keyGap, lineLabel, lineGap, noIndent, favorites, startGroup, scriptsGroup, keepOnTop, directKeyboard, editor, send, stop, status });
         LoadSettings();
         projectPath.TextChanged += delegate {
             if (loadingSettings) return;
@@ -546,6 +552,23 @@ class TextSender : Form
         SerialPort old = connection;
         connection = null;
         if (old != null) { try { old.Dispose(); } catch { } }
+    }
+
+    void OpenKeyboardPassthrough()
+    {
+        if (busy || closing) return;
+        if (ports.SelectedItem == null) { status.Text = "未找到串口，请连接开发板后点击刷新。"; return; }
+        string port = ports.Text;
+        SetBusy(true);
+        try {
+            CloseConnection();
+            using (var dialog = new KeyboardPassthroughForm(port)) {
+                dialog.TopMost = TopMost;
+                dialog.ShowDialog(this);
+            }
+            if (!closing) status.Text = "键盘直通已关闭，可以继续发送文字。";
+        } catch (Exception ex) { if (!closing) status.Text = "无法开启键盘直通：" + ex.Message; }
+        finally { if (!closing) SetBusy(false); }
     }
 
     public static string NormalizeScriptLocation(string value, bool allowEmpty)
@@ -705,7 +728,7 @@ class TextSender : Form
     void SetBusy(bool value)
     {
         busy = value;
-        send.Enabled = refresh.Enabled = ports.Enabled = caps.Enabled = manage.Enabled = phraseButtons.Enabled = !value;
+        send.Enabled = refresh.Enabled = ports.Enabled = caps.Enabled = manage.Enabled = phraseButtons.Enabled = directKeyboard.Enabled = !value;
         startDelay.Enabled = keyGap.Enabled = lineGap.Enabled = noIndent.Enabled = !value;
         presetAutoEnter.Enabled = !value;
         UpdateProjectControls();

@@ -2,12 +2,24 @@
 #include <atomic>
 #include "USB.h"
 #include "USBHIDKeyboard.h"
+#include "RawHidProtocol.h"
 
 // Native USB: CDC commands + HID keyboard. UART0: alternative command input.
 // Build with USBMode=0, CDCOnBoot=cdc. No keystrokes are sent on boot.
 USBHIDKeyboard keyboard;
+// USBHID instances share the existing interface and transmit state in core 3.3.8.
+// Its checked SendReport API is needed: USBHIDKeyboard::sendReport returns void.
+USBHID rawHid;
 static uint8_t textBuffer[8192];
 static Stream *channel = &Serial;
+static Stream *rawOwner = nullptr;
+static TextKeyboard::CommandLine usbLine, uartLine;
+static const uint32_t rawTimeoutMs = 1000;
+static const uint32_t rawRetryMs = 50;
+static bool rawHeld = false;
+static bool rawReleasePending = false;
+static uint32_t rawLastUpdate = 0;
+static uint32_t rawLastReleaseAttempt = 0;
 static std::atomic<bool> targetCapsLock{false};
 static std::atomic<bool> targetLedsSeen{false};
 
@@ -21,6 +33,63 @@ static void keyboardEvent(void *, esp_event_base_t base, int32_t id, void *data)
 
 static void reply(const char *message) {
   channel->println(message);
+}
+
+static bool sendRawReport(const uint8_t report[8]) {
+  return rawHid.ready() && rawHid.SendReport(HID_REPORT_ID_KEYBOARD, report, 8, 50);
+}
+
+static bool releaseRawKeys(bool force) {
+  if (!force && !rawHeld && !rawReleasePending) return true;
+  // Never retain a pressed report after a failure/disconnect. Only retry release.
+  rawHeld = false;
+  rawOwner = nullptr;
+  const uint8_t empty[8] = {};
+  const bool sent = sendRawReport(empty);
+  rawReleasePending = !sent;
+  rawLastReleaseAttempt = millis();
+  return sent;
+}
+
+static void serviceRawWatchdog() {
+  const uint32_t now = millis();
+  if (rawHeld && (static_cast<uint32_t>(now - rawLastUpdate) >= rawTimeoutMs ||
+                  !USB || (rawOwner == &Serial && !Serial))) {
+    releaseRawKeys(false);
+  } else if (rawReleasePending && rawHid.ready() &&
+             static_cast<uint32_t>(now - rawLastReleaseAttempt) >= rawRetryMs) {
+    releaseRawKeys(false);
+  }
+}
+
+static bool handleRawCommand(const char *command) {
+  uint8_t report[8];
+  const TextKeyboard::HidCommand kind = TextKeyboard::parseHidCommand(command, report);
+  if (kind == TextKeyboard::HidCommand::NotHid) return false;
+  if (kind == TextKeyboard::HidCommand::Invalid) {
+    releaseRawKeys(false);
+    reply("ERR COMMAND");
+  } else if (kind == TextKeyboard::HidCommand::Off) {
+    reply(releaseRawKeys(true) ? "OK HID" : "ERR HID");
+  } else {
+    // A timed-out transfer may still have reached the host. Clear it before
+    // accepting another nonzero report rather than replaying stale key state.
+    if (rawReleasePending && !releaseRawKeys(false)) {
+      reply("ERR HID");
+      return true;
+    }
+    if (!sendRawReport(report)) {
+      releaseRawKeys(true);
+      reply("ERR HID");
+      return true;
+    }
+    rawHeld = TextKeyboard::reportHasKeys(report);
+    rawOwner = rawHeld ? channel : nullptr;
+    rawLastUpdate = millis();
+    rawReleasePending = false;
+    reply("OK HID");
+  }
+  return true;
 }
 
 static bool cancelled() {
@@ -78,19 +147,21 @@ void setup() {
   USB.begin();
 }
 
-void loop() {
-  if (Serial0.available()) channel = &Serial0;
-  else if (Serial.available()) channel = &Serial;
-  else { delay(1); return; }
-  String command = channel->readStringUntil('\n');
+static void processCommand(const char *line) {
+  String command(line);
   command.trim();
   if (command == "PING") {
-    channel->print("ESP32S3-TEXTKEY/1 FW=1.3 TYPE2=1 KEY_HOLD=20 ASCII MAX=8192 INPUT=USB+UART0 CAPS_FIX=1 CAPS=");
+    channel->print("ESP32S3-TEXTKEY/1 FW=1.4 TYPE2=1 KEY_HOLD=20 ASCII MAX=8192 INPUT=USB+UART0 CAPS_FIX=1 CAPS=");
     channel->print(targetCapsLock.load(std::memory_order_relaxed) ? 1 : 0);
     channel->print(" LED_SEEN=");
-    channel->println(targetLedsSeen.load(std::memory_order_relaxed) ? 1 : 0);
+    channel->print(targetLedsSeen.load(std::memory_order_relaxed) ? 1 : 0);
+    channel->println(" HID=1 HID_TIMEOUT=1000");
     return;
   }
+  if (handleRawCommand(command.c_str())) return;
+  // Legacy text/key actions may wait for payloads. Release passthrough first,
+  // and do not begin a blocking operation while a release is still pending.
+  if (!releaseRawKeys(false)) { reply("ERR HID"); return; }
   unsigned int key = 0, repeat = 0;
   char trailing = 0;
   if (sscanf(command.c_str(), "KEY %u %u %c", &key, &repeat, &trailing) == 2 &&
@@ -159,4 +230,33 @@ void loop() {
   }
   keyboard.releaseAll();
   reply("DONE");
+}
+
+void loop() {
+  serviceRawWatchdog();
+  Stream *next = nullptr;
+  if (Serial0.available()) next = &Serial0;
+  else if (Serial.available()) next = &Serial;
+  else { delay(1); return; }
+  if (next != channel) {
+    releaseRawKeys(false);
+    channel = next;
+  }
+  TextKeyboard::CommandLine &line = channel == &Serial0 ? uartLine : usbLine;
+  // Bounded work keeps watchdog servicing independent of input traffic.
+  for (size_t budget = 0; budget < 64 && channel->available(); ++budget) {
+    const int byte = channel->read();
+    if (byte < 0) break;
+    const TextKeyboard::CommandLine::Result result = line.push(static_cast<uint8_t>(byte));
+    if (result == TextKeyboard::CommandLine::Result::Complete) {
+      processCommand(line.text);
+      return;
+    }
+    if (result == TextKeyboard::CommandLine::Result::Rejected ||
+        result == TextKeyboard::CommandLine::Result::Cancelled) {
+      releaseRawKeys(false);
+      reply(result == TextKeyboard::CommandLine::Result::Cancelled ? "CANCELLED" : "ERR COMMAND");
+      return;
+    }
+  }
 }

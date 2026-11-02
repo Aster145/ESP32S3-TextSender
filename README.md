@@ -2,13 +2,13 @@
 
 Windows 桌面串口发送工具，将文本交给 ESP32-S3，由开发板的原生 USB 接口模拟键盘输入。支持编辑框、可编辑常用短语、可命名的多个项目及各自的脚本快捷按钮，以及读取所选 ns2jb / HBLauncher 项目的 `V=START` 连接口令。
 
-当前版本 v1.9.1 使用 TextKeyboard v1.3 固件。开发板已经运行该固件时，无需重新刷机。
+当前版本 v1.10.0 新增键盘直通，需要配套 TextKeyboard v1.4 固件。原有文字、常用短语和 V=START 发送继续兼容 v1.3；仅使用这些功能时无需重新刷机。
 
 [下载最新 Windows 便携版](https://github.com/Aster145/ESP32S3-TextSender/releases/latest)
 
 ## 开始使用
 
-需要 Windows、.NET Framework 4.8，以及运行配套 TextKeyboard v1.3 固件的 ESP32-S3。目标设备应使用英文 / US 键盘布局。
+需要 Windows、.NET Framework 4.8，以及运行配套 TextKeyboard v1.3 或 v1.4 固件的 ESP32-S3；键盘直通需要 v1.4。目标设备应使用英文 / US 键盘布局。
 
 1. 将程序放在可写目录，运行 `TextSender.exe`。从源码使用时，先按下方步骤构建。
 2. 双 USB 开发板的 **UART / COM 接口接电脑**，**原生 USB / OTG 接口接收键盘输入的目标设备**。接口用途以开发板标注为准。
@@ -18,6 +18,16 @@ Windows 桌面串口发送工具，将文本交给 ESP32-S3，由开发板的原
 启动程序、切换项目和获取口令预览都不会自动发送按键。
 
 程序使用键盘与发送箭头图标，并以单例模式运行：重复打开同一版本会唤起已有窗口，最小化后也会恢复；已有的文字、项目和串口连接保持不变。复制到其他目录的同版本程序也只运行一个，使用先启动那份程序的设置。退出已有窗口后，可以正常重新打开。升级前请先退出旧版程序。
+
+## 键盘直通
+
+先按 [固件说明](firmware/FLASHING.md) 将 ESP32-S3 更新为 TextKeyboard v1.4。保持原来的双线连接：UART / COM 接电脑，原生 USB / OTG 接收按键的目标设备。
+
+选择串口后点击“键盘直通…”。连接成功后，在直通窗口中使用自己的键盘，按下、松开和持续按住都会转发；支持方向键、功能键、数字小键盘及组合键，例如 `W + Shift + 空格` 或 `Ctrl + C`。可同时按住 **6 个普通键和左右 Ctrl、Shift、Alt、Win 修饰键**，超过普通键数量时会提示。直通不使用文字发送的倒计时、逐字间隔或自动回车设置。
+
+直通只在该窗口位于前台且未暂停时生效。点击“暂停直通”、切换到其他窗口或关闭直通时，会请求释放全部按键；切换窗口后需要点击“继续直通”恢复。断线时固件会在约 1 秒未收到按键状态更新后释放按键。直通期间不能同时发送文字或启动脚本；关闭后恢复原有功能。
+
+按键按物理键位转发，目标设备自行决定键盘布局、大小写和长按重复行为，不传输电脑输入法生成的中文。Windows 保留快捷键（例如 Alt+Tab、Ctrl+Alt+Del）仍可能由电脑优先处理。程序不会在后台记录键盘输入。
 
 ## 文本与常用短语
 
@@ -103,11 +113,13 @@ build.cmd
 src/
   TextSender.cs              Windows 界面、串口发送和本地设置
   SenderApplication.cs       单例启动、窗口唤起及图标资源
+  KeyboardPassthrough.cs     多键状态映射和实时串口会话
+  KeyboardPassthroughForm.cs 前台键盘直通窗口、暂停和释放
   StartTokenReader.cs        按项目读取与检查连接口令
   ExplorerFolderPicker.cs    原生 Windows 文件夹选择器
 assets/TextSender.ico         程序、窗口及任务栏图标
 firmware/TextKeyboard/
-  TextKeyboard.ino           配套 v1.3 固件源码
+  TextKeyboard.ino           配套 v1.4 固件源码
 settings.example.xml         无个人数据的初始配置
 build.cmd                    Windows 构建脚本
 test.cmd                     构建并运行离线与界面逻辑检查
@@ -133,12 +145,15 @@ type dist\offline-report.txt
 
 ## 固件下载与源码
 
-仓库包含 `firmware/TextKeyboard/TextKeyboard.ino`，发布页提供配套 **TextKeyboard v1.3 / ESP32-S3 / 16MB Flash** 固件：
+仓库包含 **TextKeyboard v1.4 / ESP32-S3 / 16MB Flash** 固件源码 `firmware/TextKeyboard/TextKeyboard.ino` 和 `RawHidProtocol.h`。键盘直通需要这个版本，构建与刷写方法见 [刷写说明](firmware/FLASHING.md)。
 
-- [固件压缩包（BIN、源码、刷写说明）](https://github.com/Aster145/ESP32S3-TextSender/releases/download/v1.7.1/ESP32S3-TextKeyboard-v1.3-16MB.zip)
-- [刷写说明](firmware/FLASHING.md)
+- [下载 v1.4 固件压缩包（支持键盘直通，含 BIN、源码和刷写说明）](https://github.com/Aster145/ESP32S3-TextSender/releases/download/v1.10.0/ESP32S3-TextKeyboard-v1.4-16MB.zip)
 
-合并镜像从 **0x0** 写入整个 16MB Flash，会覆盖现有程序和存储数据。此包仅用于匹配配置的 ESP32-S3；已有配套 v1.3 固件可以继续使用，更新 TextSender 不需要重刷。
+旧版 v1.3 仍可下载，用于原有文字发送功能：
+
+- [v1.3 固件压缩包（不支持键盘直通）](https://github.com/Aster145/ESP32S3-TextSender/releases/download/v1.7.1/ESP32S3-TextKeyboard-v1.3-16MB.zip)
+
+合并镜像从 **0x0** 写入整个 16MB Flash，会覆盖现有程序和存储数据。此包仅用于匹配配置的 ESP32-S3；仅使用原有文字发送功能时，已有配套 v1.3 固件可以继续使用。
 
 源码面向 Arduino ESP32 的原生 USB OTG 模式，构建注释要求 `USBMode=0`、`CDCOnBoot=cdc`。UART0 使用 115200 波特率、RX GPIO44、TX GPIO43；原生 USB 同时提供 HID 键盘和 CDC 命令接口。具体开发板的引脚连接、Flash / PSRAM 选项及烧录参数应按板型确认。
 
