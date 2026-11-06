@@ -14,8 +14,8 @@ using System.Xml;
 using System.Xml.Serialization;
 
 [assembly: System.Reflection.AssemblyTitle("ESP32-S3 TextSender")]
-[assembly: System.Reflection.AssemblyVersion("1.10.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.10.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.10.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.10.1.0")]
 
 public class PhrasePreset
 {
@@ -352,7 +352,7 @@ class TextSender : Form
     internal TextSender(string[] args)
     {
         arguments = args;
-        Text = "ESP32-S3 键盘输入 v1.10.0";
+        Text = "ESP32-S3 键盘输入 v1.10.1";
         Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(940, 800);

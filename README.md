@@ -2,7 +2,7 @@
 
 Windows 桌面串口发送工具，将文本交给 ESP32-S3，由开发板的原生 USB 接口模拟键盘输入。支持编辑框、可编辑常用短语、可命名的多个项目及各自的脚本快捷按钮，以及读取所选 ns2jb / HBLauncher 项目的 `V=START` 连接口令。
 
-当前版本 v1.10.0 新增键盘直通，需要配套 TextKeyboard v1.4 固件。原有文字、常用短语和 V=START 发送继续兼容 v1.3；仅使用这些功能时无需重新刷机。
+当前版本 v1.10.1 为键盘直通新增默认开启的电脑快捷键屏蔽。键盘直通需要配套 TextKeyboard v1.4 固件，已刷 v1.4 无需再次刷机。原有文字、常用短语和 V=START 发送继续兼容 v1.3；仅使用这些功能时无需重新刷机。
 
 [下载最新 Windows 便携版](https://github.com/Aster145/ESP32S3-TextSender/releases/latest)
 
@@ -27,7 +27,9 @@ Windows 桌面串口发送工具，将文本交给 ESP32-S3，由开发板的原
 
 直通只在该窗口位于前台且未暂停时生效。点击“暂停直通”、切换到其他窗口或关闭直通时，会请求释放全部按键；切换窗口后需要点击“继续直通”恢复。断线时固件会在约 1 秒未收到按键状态更新后释放按键。直通期间不能同时发送文字或启动脚本；关闭后恢复原有功能。
 
-按键按物理键位转发，目标设备自行决定键盘布局、大小写和长按重复行为，不传输电脑输入法生成的中文。Windows 保留快捷键（例如 Alt+Tab、Ctrl+Alt+Del）仍可能由电脑优先处理。程序不会在后台记录键盘输入。
+“屏蔽电脑快捷键”默认开启。在直通窗口控制时，程序会提前拦截按键，阻止常见全局快捷键、Alt+Tab、Alt+F4、Win 键等交给电脑上的其他程序；按键仍正常发送给目标设备。需要操作电脑时，用鼠标点击“暂停直通”、关闭直通或点击其他窗口，立即解除接管。切换屏蔽选项也会先释放全部按键。开始和暂停前请先松开所有按键；若按住某键暂停，恢复后该键需松开后再按一次，避免旧持键意外重放。
+
+按键按物理键位转发，目标设备自行决定键盘布局、大小写和长按重复行为，不传输电脑输入法生成的中文。屏蔽功能不提供系统级独占：Ctrl+Alt+Del、Win+L 等 Windows 保留快捷键，以及使用独立键盘驱动或其他底层输入方式的程序，仍可能响应；其他键盘钩子也可能相互影响。参见 [Microsoft 的键盘拦截说明](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc) 和 [保留快捷键及兼容性说明](https://learn.microsoft.com/en-us/windows/powertoys/keyboard-manager)。程序不记录键盘输入，暂停、失焦、断开或退出时停止拦截。
 
 ## 文本与常用短语
 
@@ -114,6 +116,7 @@ src/
   TextSender.cs              Windows 界面、串口发送和本地设置
   SenderApplication.cs       单例启动、窗口唤起及图标资源
   KeyboardPassthrough.cs     多键状态映射和实时串口会话
+  KeyboardCaptureHook.cs     直通期间拦截电脑快捷键
   KeyboardPassthroughForm.cs 前台键盘直通窗口、暂停和释放
   StartTokenReader.cs        按项目读取与检查连接口令
   ExplorerFolderPicker.cs    原生 Windows 文件夹选择器
