@@ -14,11 +14,23 @@
       <Name>问候</Name>
       <Text>Hello ESP32-S3!</Text>
       <AppendEnter>false</AppendEnter>
+      <IsScript>false</IsScript>
     </PhrasePreset>
     <PhrasePreset>
       <Name>符号示例</Name>
       <Text>REM AbC "x#";4+8</Text>
       <AppendEnter>false</AppendEnter>
+      <IsScript>false</IsScript>
+    </PhrasePreset>
+    <PhrasePreset>
+      <Name>脚本示例</Name>
+      <Text>TEXT Hello!
+WAIT 2
+KEY Enter
+TEXT Second
+KEY Backspace x3</Text>
+      <AppendEnter>false</AppendEnter>
+      <IsScript>true</IsScript>
     </PhrasePreset>
   </Presets>
 </SenderSettings>

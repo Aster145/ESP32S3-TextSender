@@ -54,6 +54,7 @@ class ProjectSwitchUiCheck
             writer.WriteElementString("Name", "保留的常用短语");
             writer.WriteElementString("Text", "REM Preserved\n  NEXT");
             writer.WriteElementString("AppendEnter", "false");
+            writer.WriteElementString("IsScript", "false");
             writer.WriteEndElement(); writer.WriteEndElement(); writer.WriteEndElement();
         }
     }

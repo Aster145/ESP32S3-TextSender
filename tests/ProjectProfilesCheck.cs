@@ -40,7 +40,7 @@ class ProjectProfilesCheck
             Add(xml, item, "Name", "Legacy script"); Add(xml, item, "ScriptPath", script); Add(xml, item, "WorkingDirectory", "");
         }
         XmlNode presets = Add(xml, root, "Presets", null), preset = Add(xml, presets, "PhrasePreset", null);
-        Add(xml, preset, "Name", "Keep & <fixture>"); Add(xml, preset, "Text", "  REM Keep\r\n  NEXT"); Add(xml, preset, "AppendEnter", "false");
+        Add(xml, preset, "Name", "Keep & <fixture>"); Add(xml, preset, "Text", "  REM Keep\r\n  NEXT"); Add(xml, preset, "AppendEnter", "false"); Add(xml, preset, "IsScript", "false");
         WriteXml(xml, path);
     }
     static object Shortcut(string name, string path) {

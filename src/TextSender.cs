@@ -14,16 +14,18 @@ using System.Xml;
 using System.Xml.Serialization;
 
 [assembly: System.Reflection.AssemblyTitle("ESP32-S3 TextSender")]
-[assembly: System.Reflection.AssemblyVersion("1.10.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.10.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.11.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.11.0.0")]
 
 public class PhrasePreset
 {
     public string Name { get; set; }
     public string Text { get; set; }
     public bool AppendEnter { get; set; }
+    // Script presets store PresetScript source in Text instead of literal content.
+    public bool IsScript { get; set; }
     public override string ToString() { return Name ?? ""; }
-    public PhrasePreset Copy() { return new PhrasePreset { Name = Name, Text = Text, AppendEnter = AppendEnter }; }
+    public PhrasePreset Copy() { return new PhrasePreset { Name = Name, Text = Text, AppendEnter = AppendEnter, IsScript = IsScript }; }
 }
 
 public class ScriptShortcut
@@ -73,6 +75,8 @@ public class SenderSettings
         settings.Projects = new List<ProjectProfile>();
         settings.Presets.Add(new PhrasePreset { Name = "问候", Text = "Hello ESP32-S3!" });
         settings.Presets.Add(new PhrasePreset { Name = "符号示例", Text = "REM AbC \"x#\";4+8" });
+        settings.Presets.Add(new PhrasePreset { Name = "脚本示例", IsScript = true,
+            Text = "TEXT Hello!\nWAIT 2\nKEY Enter\nTEXT Second\nKEY Backspace x3" });
         return settings;
     }
 }
@@ -214,7 +218,10 @@ class PresetManager : Form
     ListBox list = new ListBox();
     TextBox name = new TextBox(), text = new TextBox();
     CheckBox appendEnter = new CheckBox();
+    CheckBox isScript = new CheckBox();
     Button remove = new Button();
+    Button syntax = new Button();
+    Label textLabel = new Label();
     bool loading;
     public List<PhrasePreset> Result { get; private set; }
 
@@ -234,8 +241,14 @@ class PresetManager : Form
         var nameLabel = new Label { Text = "按钮名称", AutoSize = true, Location = new Point(240, 19) };
         name.SetBounds(330, 14, 410, 30);
         name.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        var textLabel = new Label { Text = "发送内容（保留空格和换行）", AutoSize = true, Location = new Point(240, 58) };
-        text.SetBounds(240, 89, 500, 285);
+        isScript.Text = "脚本模式（TEXT / KEY / WAIT / RUN 指令，支持按键和间隔）";
+        isScript.SetBounds(240, 55, 500, 30);
+        isScript.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        isScript.CheckedChanged += delegate { UpdateDraft(); UpdateModeLayout(); };
+        textLabel.Text = "发送内容（保留空格和换行）";
+        textLabel.AutoSize = true;
+        textLabel.Location = new Point(240, 92);
+        text.SetBounds(240, 120, 500, 254);
         text.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         text.Multiline = true; text.AcceptsReturn = true; text.AcceptsTab = true;
         text.ScrollBars = ScrollBars.Both; text.WordWrap = false;
@@ -248,12 +261,17 @@ class PresetManager : Form
         appendEnter.CheckedChanged += delegate { UpdateDraft(); };
         var add = new Button { Text = "新增", Location = new Point(16, 430), Size = new Size(90, 34) };
         remove.Text = "删除"; remove.SetBounds(116, 430, 90, 34);
+        syntax.Text = "脚本语法…"; syntax.SetBounds(215, 430, 110, 34);
+        syntax.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+        syntax.Click += delegate {
+            using (var dialog = new PresetScriptHelpForm()) dialog.ShowDialog(this);
+        };
         var ok = new Button { Text = "保存", Location = new Point(540, 430), Size = new Size(95, 34) };
         var cancel = new Button { Text = "取消", Location = new Point(645, 430), Size = new Size(95, 34), DialogResult = DialogResult.Cancel };
-        add.Anchor = remove.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+        add.Anchor = remove.Anchor = syntax.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         ok.Anchor = cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
         add.Click += delegate {
-            var item = new PhrasePreset { Name = "新短语", Text = "", AppendEnter = false };
+            var item = new PhrasePreset { Name = "新短语", Text = "", AppendEnter = false, IsScript = false };
             Result.Add(item); list.Items.Add(item); list.SelectedIndex = Result.Count - 1;
             name.Focus(); name.SelectAll();
         };
@@ -272,10 +290,18 @@ class PresetManager : Form
             } catch (Exception ex) { MessageBox.Show(this, ex.Message, "短语尚未保存", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         };
         CancelButton = cancel;
-        Controls.AddRange(new Control[] { list, nameLabel, name, textLabel, text, appendEnter, add, remove, ok, cancel });
+        Controls.AddRange(new Control[] { list, nameLabel, name, isScript, textLabel, text, appendEnter, add, remove, syntax, ok, cancel });
         foreach (PhrasePreset item in Result) list.Items.Add(item);
         if (list.Items.Count > 0) list.SelectedIndex = 0;
         else LoadSelected();
+    }
+
+    void UpdateModeLayout()
+    {
+        if (loading) return;
+        bool script = isScript.Checked;
+        textLabel.Text = script ? "脚本内容（每行一条指令，# 开头为注释）" : "发送内容（保留空格和换行）";
+        appendEnter.Enabled = !script && list.SelectedIndex >= 0;
     }
 
     void LoadSelected()
@@ -284,11 +310,13 @@ class PresetManager : Form
         loading = true;
         int index = list.SelectedIndex;
         bool selected = index >= 0;
-        name.Enabled = text.Enabled = appendEnter.Enabled = remove.Enabled = selected;
+        name.Enabled = text.Enabled = isScript.Enabled = appendEnter.Enabled = remove.Enabled = selected;
         name.Text = selected ? Result[index].Name : "";
         text.Text = selected ? Result[index].Text : "";
+        isScript.Checked = selected && Result[index].IsScript;
         appendEnter.Checked = selected && Result[index].AppendEnter;
         loading = false;
+        UpdateModeLayout();
     }
 
     void UpdateDraft()
@@ -297,13 +325,37 @@ class PresetManager : Form
         if (loading || index < 0) return;
         PhrasePreset item = Result[index];
         bool changedName = item.Name != name.Text;
-        item.Name = name.Text; item.Text = text.Text; item.AppendEnter = appendEnter.Checked;
+        item.Name = name.Text; item.Text = text.Text;
+        item.AppendEnter = appendEnter.Checked; item.IsScript = isScript.Checked;
         if (changedName) {
             loading = true;
             list.Items[index] = item;
             list.SelectedIndex = index;
             loading = false;
         }
+    }
+}
+
+class PresetScriptHelpForm : Form
+{
+    public PresetScriptHelpForm()
+    {
+        Text = "脚本语法说明";
+        Icon = ApplicationIcon.Value;
+        Font = new Font("Microsoft YaHei UI", 10);
+        ClientSize = new Size(720, 560);
+        MinimumSize = SizeFromClientSize(new Size(620, 420));
+        StartPosition = FormStartPosition.CenterParent;
+        var body = new TextBox {
+            Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
+            ScrollBars = ScrollBars.Both, WordWrap = false,
+            Font = new Font("Consolas", 10),
+            Text = PresetScript.HelpText()
+        };
+        var ok = new Button { Text = "关闭", Dock = DockStyle.Bottom, Height = 36, DialogResult = DialogResult.OK };
+        Controls.Add(body);
+        Controls.Add(ok);
+        CancelButton = ok;
     }
 }
 
@@ -336,6 +388,7 @@ class TextSender : Form
     string activeProjectPath = "";
     SerialPort connection, active;
     bool busy, closing, loadingSettings, projectPathChanged, updatingProjects;
+    volatile bool scriptCancel;
     string settingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
     string[] arguments;
 
@@ -352,7 +405,7 @@ class TextSender : Form
     internal TextSender(string[] args)
     {
         arguments = args;
-        Text = "ESP32-S3 键盘输入 v1.10.1";
+        Text = "ESP32-S3 键盘输入 v1.11";
         Icon = ApplicationIcon.Value;
         Font = new Font("Microsoft YaHei UI", 10);
         ClientSize = new Size(940, 800);
@@ -469,6 +522,9 @@ class TextSender : Form
         stop.Text = "停止"; stop.SetBounds(260, 704, 80, 36);
         stop.Anchor = AnchorStyles.Bottom | AnchorStyles.Left; stop.Enabled = false;
         stop.Click += delegate {
+            // Cancel PC-side script waits first: during WAIT there is no
+            // firmware command in flight to cancel with the cancel byte.
+            scriptCancel = true;
             try { if (active != null && active.IsOpen) active.Write(new byte[] { 24 }, 0, 1); }
             catch (Exception ex) { status.Text = "停止失败：" + ex.Message; }
         };
@@ -512,6 +568,7 @@ class TextSender : Form
             ApplyProjectName();
             ApplyProjectPath();
             closing = true;
+            scriptCancel = true;
             try { if (busy && active != null && active.IsOpen) active.Write(new byte[] { 24 }, 0, 1); } catch { }
             CloseConnection(); tips.Dispose();
         };
@@ -689,6 +746,12 @@ class TextSender : Form
     public static void ValidatePreset(PhrasePreset item)
     {
         if (item == null || String.IsNullOrWhiteSpace(item.Name)) throw new Exception("每个短语都需要一个按钮名称。");
+        if (item.IsScript)
+        {
+            try { PresetScript.Parse(item.Text); }
+            catch (Exception ex) { throw new Exception("脚本短语「" + item.Name + "」：" + ex.Message); }
+            return;
+        }
         try { Encode(PresetText(item)); }
         catch (Exception ex) { throw new Exception("短语「" + item.Name + "」：" + ex.Message); }
     }
@@ -716,6 +779,110 @@ class TextSender : Form
         } catch (Exception ex) {
             if (!closing) status.Text = "发送失败：" + ex.Message;
         } finally { if (!closing) SetBusy(false); }
+    }
+
+    async Task SendScript(PhrasePreset item)
+    {
+        if (busy || closing) return;
+        List<PresetScriptStep> steps;
+        try { steps = PresetScript.Parse(item.Text); }
+        catch (Exception ex) {
+            if (!closing) status.Text = "脚本短语「" + item.Name + "」未执行：" + ex.Message;
+            return;
+        }
+        if (ports.SelectedItem == null) {
+            if (!closing) status.Text = "未找到串口，请连接开发板后点击刷新。";
+            return;
+        }
+        SetBusy(true);
+        scriptCancel = false;
+        string port = ports.Text;
+        int gap = (int)keyGap.Value, newlineWait = (int)lineGap.Value;
+        bool clearIndent = noIndent.Checked;
+        var shortcuts = new List<ScriptShortcut>(scriptShortcuts);
+        ApplyProjectPath();
+        string projectDirectory = projectPath.Text;
+        try {
+            PostToUi(delegate { stop.Enabled = true; });
+            string result = await Task.Run(() => RunScriptSteps(item.Name, port, steps, gap, newlineWait, clearIndent, shortcuts, projectDirectory));
+            if (!closing) status.Text = result;
+        } catch (Exception ex) {
+            if (!closing) status.Text = "脚本「" + item.Name + "」执行失败：" + ex.Message;
+        } finally {
+            if (!closing) SetBusy(false);
+        }
+    }
+
+    // Runs on a worker thread; the serial session stays open between steps.
+    string RunScriptSteps(string name, string port, List<PresetScriptStep> steps,
+                          int gap, int newlineWait, bool clearIndent, List<ScriptShortcut> shortcuts,
+                          string projectDirectory)
+    {
+        for (int index = 0; index < steps.Count; index++)
+        {
+            PresetScriptStep step = steps[index];
+            if (closing || scriptCancel) return StoppedScript(name, index, steps.Count);
+            PostToUi(delegate {
+                status.Text = "脚本「" + name + "」第 " + (index + 1) + "/" + steps.Count + " 步：" + step.Describe() + "……";
+            });
+            switch (step.Kind)
+            {
+                case PresetScriptStepKind.Text:
+                    // No pre-send countdown inside scripts; pacing is done by WAIT.
+                    if (Transmit(port, Encode(step.Text), 0, delegate { }, false, gap, newlineWait, clearIndent) != "DONE")
+                        return StoppedScript(name, index, steps.Count);
+                    break;
+                case PresetScriptStepKind.Key:
+                    TransmitKey(port, step.KeyCode, step.Repeat);
+                    break;
+                case PresetScriptStepKind.Wait:
+                    if (!WaitOrStop(step.WaitMs)) return StoppedScript(name, index, steps.Count);
+                    break;
+                case PresetScriptStepKind.Run:
+                    ScriptShortcut shortcut = FindShortcut(shortcuts, step.Text);
+                    if (shortcut == null)
+                        throw new Exception("RUN 找不到名为「" + step.Text + "」的脚本快捷按钮，请先在“管理脚本…”中添加。");
+                    using (Process process = Process.Start(CreateScriptStartInfo(shortcut))) { }
+                    break;
+                case PresetScriptStepKind.VStart:
+                    // Read the token at execution time, like the main-window button;
+                    // never reuse an earlier preview's token.
+                    var info = StartTokenReader.ReadLatest(projectDirectory);
+                    StartTokenReader.EnsureReady(info);
+                    PostToUi(delegate { ShowStart(info); });
+                    // Direct-mode command; editor autoindent cleanup must not follow Enter.
+                    if (Transmit(port, Encode(info.Command + "\n"), 0, delegate { }, false, gap, newlineWait, false) != "DONE")
+                        return StoppedScript(name, index, steps.Count);
+                    break;
+            }
+            if (closing || scriptCancel) return StoppedScript(name, index + 1, steps.Count);
+        }
+        return "脚本「" + name + "」执行完成，共 " + steps.Count + " 步。";
+    }
+
+    static string StoppedScript(string name, int completed, int total)
+    {
+        return "脚本「" + name + "」已停止，完成 " + completed + "/" + total + " 步。";
+    }
+
+    bool WaitOrStop(int milliseconds)
+    {
+        for (int slept = 0; slept < milliseconds; )
+        {
+            if (closing || scriptCancel) return false;
+            int chunk = Math.Min(100, milliseconds - slept);
+            Thread.Sleep(chunk);
+            slept += chunk;
+        }
+        return !closing && !scriptCancel;
+    }
+
+    static ScriptShortcut FindShortcut(List<ScriptShortcut> shortcuts, string name)
+    {
+        foreach (ScriptShortcut item in shortcuts)
+            if (item != null && String.Equals((item.Name ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
+                return item;
+        return null;
     }
 
     void PostToUi(Action action)
@@ -746,8 +913,13 @@ class TextSender : Form
         foreach (PhrasePreset entry in presets) {
             PhrasePreset item = entry;
             var button = new Button { Text = item.Name, UseMnemonic = false, AutoSize = true, Height = 34, MinimumSize = new Size(110, 34), Margin = new Padding(4) };
-            tips.SetToolTip(button, item.Text + (item.AppendEnter ? "\r\n（末尾再发送一次回车）" : ""));
-            button.Click += async delegate { await SendText(PresetText(item, presetAutoEnter.Checked), item.Name); };
+            if (item.IsScript) {
+                tips.SetToolTip(button, "（脚本短语）\r\n" + item.Text);
+                button.Click += async delegate { await SendScript(item); };
+            } else {
+                tips.SetToolTip(button, item.Text + (item.AppendEnter ? "\r\n（末尾再发送一次回车）" : ""));
+                button.Click += async delegate { await SendText(PresetText(item, presetAutoEnter.Checked), item.Name); };
+            }
             phraseButtons.Controls.Add(button);
         }
         if (presets.Count == 0) phraseButtons.Controls.Add(new Label { Text = "暂无常用短语，点击管理添加。", AutoSize = true, Margin = new Padding(6) });
@@ -1124,29 +1296,41 @@ class TextSender : Form
         return (int)Math.Min(Int32.MaxValue, ms + ms / 4 + 30000);
     }
 
+    SerialPort OpenSession(string port)
+    {
+        SerialPort serial = connection;
+        if (serial == null || !serial.IsOpen || serial.PortName != port) {
+            CloseConnection();
+            serial = new SerialPort(port, 115200);
+            connection = serial;
+            serial.NewLine = "\n";
+            serial.DtrEnable = true; serial.RtsEnable = true;
+            serial.ReadTimeout = 5000; serial.WriteTimeout = 5000;
+            serial.Open();
+            Thread.Sleep(1200);
+        }
+        if (closing) throw new OperationCanceledException("窗口已关闭。");
+        active = serial;
+        return serial;
+    }
+
+    static string Ping(SerialPort serial)
+    {
+        serial.ReadTimeout = 5000;
+        serial.DiscardInBuffer();
+        serial.WriteLine("PING");
+        string identity = serial.ReadLine().Trim();
+        if (!(identity == "ESP32S3-TEXTKEY/1" || identity.StartsWith("ESP32S3-TEXTKEY/1 ")))
+            throw new Exception("所选串口不是配套键盘固件：" + identity);
+        return identity;
+    }
+
     string Transmit(string port, byte[] data, int delayMs, Action queued, bool requireFocus,
                     int gap = 12, int newlineWait = 0, bool clearIndent = false)
     {
-        SerialPort serial = connection;
+        SerialPort serial = OpenSession(port);
         try {
-            if (serial == null || !serial.IsOpen || serial.PortName != port) {
-                CloseConnection();
-                serial = new SerialPort(port, 115200);
-                connection = serial;
-                serial.NewLine = "\n";
-                serial.DtrEnable = true; serial.RtsEnable = true;
-                serial.ReadTimeout = 5000; serial.WriteTimeout = 5000;
-                serial.Open();
-                Thread.Sleep(1200);
-            }
-            if (closing) throw new OperationCanceledException("窗口已关闭。");
-            active = serial;
-            serial.ReadTimeout = 5000;
-            serial.DiscardInBuffer();
-            serial.WriteLine("PING");
-            string identity = serial.ReadLine().Trim();
-            if (!(identity == "ESP32S3-TEXTKEY/1" || identity.StartsWith("ESP32S3-TEXTKEY/1 ")))
-                throw new Exception("所选串口不是配套键盘固件：" + identity);
+            string identity = Ping(serial);
             if (requireFocus && GetForegroundWindow() != Handle) throw new Exception("测试窗口不在前台，未发送按键。");
             if (data == null) {
                 serial.WriteLine("KEY 193 1");
@@ -1165,6 +1349,22 @@ class TextSender : Form
             response = serial.ReadLine().Trim();
             if (response != "DONE" && response != "CANCELLED") throw new Exception(response);
             return response;
+        } catch { CloseConnection(); throw; }
+        finally { active = null; }
+    }
+
+    // Send one special key via the firmware "KEY <code> <repeat>" command.
+    string TransmitKey(string port, int code, int repeat)
+    {
+        if (code < 0x88 || code > 0xFF || repeat < 1 || repeat > 100)
+            throw new ArgumentOutOfRangeException("按键键码或次数超出固件支持范围。");
+        SerialPort serial = OpenSession(port);
+        try {
+            Ping(serial);
+            serial.WriteLine("KEY " + code + " " + repeat);
+            string result = serial.ReadLine().Trim();
+            if (result != "DONE") throw new Exception(result);
+            return result;
         } catch { CloseConnection(); throw; }
         finally { active = null; }
     }
@@ -1206,9 +1406,27 @@ class TextSender : Form
             rejects(() => ValidatePreset(new PhrasePreset { Name = "中文内容", Text = "内容" }), "preset ASCII guard");
             rejects(() => ValidatePreset(new PhrasePreset { Name = "too long", Text = new string('a', 8192), AppendEnter = true }), "Enter counts toward byte maximum");
             rejects(() => ValidatePreset(new PhrasePreset { Name = " ", Text = "A" }), "preset name required");
+            var scriptSteps = PresetScript.Parse("# 注释\r\nTEXT Hello\\nWorld\r\nWAIT 2\r\nKEY Backspace x3\r\nRUN FTP\r\nVSTART");
+            check(scriptSteps.Count == 5 && scriptSteps[0].Kind == PresetScriptStepKind.Text && scriptSteps[0].Text == "Hello\nWorld" &&
+                scriptSteps[1].Kind == PresetScriptStepKind.Wait && scriptSteps[1].WaitMs == 2000 &&
+                scriptSteps[2].Kind == PresetScriptStepKind.Key && scriptSteps[2].KeyCode == 0xB2 && scriptSteps[2].Repeat == 3 &&
+                scriptSteps[3].Kind == PresetScriptStepKind.Run && scriptSteps[3].Text == "FTP" &&
+                scriptSteps[4].Kind == PresetScriptStepKind.VStart, "script step parsing");
+            check(scriptSteps[2].LineNumber == 4, "script step line numbers count comment lines");
+            check(scriptSteps[4].LineNumber == 6 && scriptSteps[4].Describe().Contains("V=START"), "VSTART describes itself");
+            rejects(() => PresetScript.Parse("PRINT x"), "unknown script verb");
+            rejects(() => PresetScript.Parse("VSTART now"), "vstart takes no arguments");
+            rejects(() => PresetScript.Parse("KEY Nope"), "unknown script key name");
+            rejects(() => PresetScript.Parse("WAIT 61"), "script wait upper bound");
+            rejects(() => PresetScript.Parse("TEXT a\\q"), "script escape guard");
+            rejects(() => PresetScript.Parse("# only comments"), "script must contain a step");
+            rejects(() => ValidatePreset(new PhrasePreset { Name = "坏脚本", IsScript = true, Text = "WAIT 99" }), "script preset validation");
+            check(PresetScript.HelpText().Contains("KEY Backspace x3") && PresetScript.HelpText().Contains("RUN"), "script help text");
             var settings = SenderSettings.Defaults();
             check(settings.KeepOnTop, "always on top enabled by default");
-            check(settings.StartDelayMs == 0 && settings.Presets.Count == 2 && !settings.Presets[0].AppendEnter && !settings.Presets[1].AppendEnter, "safe defaults");
+            check(settings.StartDelayMs == 0 && settings.Presets.Count == 3 && !settings.Presets[0].AppendEnter && !settings.Presets[1].AppendEnter
+                && !settings.Presets[0].IsScript && !settings.Presets[1].IsScript && settings.Presets[2].IsScript, "safe defaults");
+            check(PresetScript.Parse(settings.Presets[2].Text).Count == 5, "default script preset must parse");
             settings.StartDelayMs = 1700; settings.KeyGapMs = 40; settings.LineGapMs = 250; settings.ClearIndent = true;
             settings.KeepOnTop = false; settings.Ns2ProjectPath = "D:\\ns2jb test\\项目";
             settings.Presets[0].Name = "首项 & <测试>"; settings.Presets[0].Text = "  A\r\n B\nC"; settings.Presets[0].AppendEnter = true;
@@ -1216,8 +1434,9 @@ class TextSender : Form
             SenderSettings restored = ReadSettingsFile(settingsTestPath);
             check(!restored.KeepOnTop && restored.Ns2ProjectPath == settings.Ns2ProjectPath, "topmost and project path settings roundtrip");
             check(restored.StartDelayMs == 1700 && restored.KeyGapMs == 40 && restored.LineGapMs == 250 && restored.ClearIndent, "timing settings roundtrip");
-            check(restored.Presets.Count == 2 && restored.Presets[0].Name == settings.Presets[0].Name && restored.Presets[1].Name == settings.Presets[1].Name, "preset names and order roundtrip");
+            check(restored.Presets.Count == 3 && restored.Presets[0].Name == settings.Presets[0].Name && restored.Presets[1].Name == settings.Presets[1].Name, "preset names and order roundtrip");
             check(restored.Presets[0].Text == settings.Presets[0].Text && restored.Presets[0].AppendEnter, "preset multiline and Enter roundtrip");
+            check(restored.Presets[2].IsScript && restored.Presets[2].Text == settings.Presets[2].Text, "script preset roundtrip");
             settings.StartDelayMs = 0; WriteSettingsFile(settingsTestPath, settings);
             check(ReadSettingsFile(settingsTestPath).StartDelayMs == 0, "update existing settings");
             settings.KeyGapMs = 0;
